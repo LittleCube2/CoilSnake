@@ -11,5 +11,6 @@
 /tests/test_data/roms/variants
 /tests/test_data/roms/real_EarthBound.smc
 /TODO.txt
+/coilsnake/assets/modulelist-override.txt
 /coilsnake/assets/ccc/ccc
 /coilsnake/assets/ccc/lib/*.ccs
