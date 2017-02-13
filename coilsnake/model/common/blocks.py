@@ -37,9 +37,9 @@ class Block(object):
 
         try:
             if type(f) == str:
-                self.size = os.path.getsize(f)
+                self.size = int(os.path.getsize(f))
             else:
-                self.size = os.path.getsize(f.name)
+                self.size = int(os.path.getsize(f.name))
 
             del self.data
             self.data = array.array('B')

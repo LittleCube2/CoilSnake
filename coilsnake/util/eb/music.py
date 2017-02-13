@@ -1,5 +1,7 @@
 import logging
 
+from coilsnake.exceptions.common.exceptions import OutOfBoundsError
+
 log = logging.getLogger(__name__)
 
 # The sizes of sequences which are embedded inside the "program" chunk. Because these sequences aren't stored as
@@ -61,8 +63,20 @@ def write_pack(block, pack):
 # - overwriting any other data in the pack
 # - conflicting with the space used by other chunks in any "partner packs"
 def find_free_offset_in_pack(packs, pack_id, partner_pack_ids, data_size):
-    # TODO
-    return None
+    # Find the first range big enough to hold the data
+    offset = 0
+    pack_ids = {pack_id}.union(partner_pack_ids)
+    chunk_starts = {start: pack[start] for i, pack in enumerate(packs) for start in pack if i in pack_ids}
+    for start in sorted(chunk_starts):
+        if start - offset >= 4 + data_size:
+            break
+        else:
+            offset = start + chunk_starts[start].chunk_size()
+    else:
+        if offset + 4 + data_size > 0x10000:
+            raise OutOfBoundsError(("No free offset could be found in pack {} "
+                                   "for data of length[{}]").format(pack_id, data_size))
+    return offset
 
 
 def get_sequence_pointer(bgm_id, program_chunk):
@@ -70,7 +84,7 @@ def get_sequence_pointer(bgm_id, program_chunk):
 
 
 def create_sequence(bgm_id, sequence_pack_id, sequence_pack, program_chunk):
-    from coilsnake.model.eb.music import Sequence
+    from coilsnake.model.eb.music import Chunk, Sequence
     sequence_pointer = get_sequence_pointer(bgm_id=bgm_id, program_chunk=program_chunk)
     log.debug("Reading BGM {:#x}'s sequence from address[{:#x}]".format(bgm_id, sequence_pointer))
 

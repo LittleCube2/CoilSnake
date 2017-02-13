@@ -49,7 +49,7 @@ class MusicModule(EbModule):
                                          for bgm_id in range(self.music_dataset_table.num_rows)],
                                      set())
          # Pack 1 is always loaded in SPC memory so it's not loaded by a BGM, but it does have instruments in it
-        instrument_pack_ids.update([1])
+        instrument_pack_ids.add(1)
         for instrument_pack_id in instrument_pack_ids:
             if instrument_pack_id == 0xff:
                 continue
@@ -78,12 +78,12 @@ class MusicModule(EbModule):
                                      [[self.music_dataset_table[bgm_id][0], self.music_dataset_table[bgm_id][1]]
                                          for bgm_id in range(self.music_dataset_table.num_rows)],
                                      set())
-        instrument_pack_ids.update(1)
+        instrument_pack_ids.add(1)
         primary_instrument_pack_ids = reduce(lambda x, y: x.union(y),
                                              [[self.music_dataset_table[bgm_id][0]]
                                               for bgm_id in range(self.music_dataset_table.num_rows)],
                                              set())
-        primary_instrument_pack_ids.update(1)
+        primary_instrument_pack_ids.add(1)
         secondary_instrument_pack_ids = instrument_pack_ids - primary_instrument_pack_ids
 
         # 0b. Determine which other instrument packs are used in conjunction with all instrument packs
@@ -94,11 +94,13 @@ class MusicModule(EbModule):
             partner_pack_ids = {1}
             for bgm_id in range(self.music_dataset_table.num_rows):
                 if self.music_dataset_table[bgm_id][1] == secondary_instrument_pack_id:
-                    partner_pack_ids.update(self.music_dataset_table[bgm_id][0])
+                    partner_pack_ids.add(self.music_dataset_table[bgm_id][0])
+            instrument_pack_partner_pack_ids[secondary_instrument_pack_id] = partner_pack_ids
 
         # 1. Put all of the chunks into packs
-        packs = [dict() for x in range(256)]
-        free_pack_ids = set(range(256)) - instrument_pack_ids
+        # TODO Currently capped at the initial table's size, but should be able to go higher with some ASM hacking
+        packs = [dict() for x in range(self.pack_pointer_table.num_rows)]
+        free_pack_ids = set(range(self.pack_pointer_table.num_rows)) - instrument_pack_ids
 
         # 1a. Put the program chunk into pack 1, offset 0x500
         packs[1][0x0500] = self.program_chunk
@@ -107,14 +109,15 @@ class MusicModule(EbModule):
         self.note_styles.write_to_pack(packs[1])
 
         # 1c. Insert the primary instrument packs
-        for pack_id, instrument_set in [(x, self.instrument_sets[x]) for x in primary_instrument_pack_ids]:
+        for pack_id, instrument_set in [(x, self.instrument_sets[x]) for x in primary_instrument_pack_ids if self.instrument_sets[x]]:
             instrument_set.write_to_pack(
                 packs=packs,
                 pack_id=pack_id,
                 partner_pack_ids=instrument_pack_partner_pack_ids[pack_id])
 
         # 1d. Insert the secondary instrument packs
-        for pack_id, instrument_set in [(x, self.instrument_sets[x]) for x in secondary_instrument_pack_ids]:
+        for pack_id, instrument_set in [
+            (x, self.instrument_sets[x]) for x in secondary_instrument_pack_ids if x != 0xFF]:
             instrument_set.write_to_pack(
                 packs=packs,
                 pack_id=pack_id,
@@ -123,7 +126,7 @@ class MusicModule(EbModule):
         # 1e. Insert the "always loaded" sequences
         bgm_spc_offsets = {}
         for bgm_id, sequence in zip(range(1, len(self.sequences)), self.sequences):
-            if not sequence.is_always_loaded:
+            if not sequence or not sequence.is_always_loaded:
                 continue
 
             self.music_dataset_table[bgm_id][2] = 1
@@ -131,8 +134,7 @@ class MusicModule(EbModule):
             sequence_offset = sequence.write_to_pack(
                 packs=packs,
                 pack_id=1,
-                partner_pack_ids={},
-                chunk_size=sequence.chunk.size())
+                partner_pack_ids={})
             bgm_spc_offsets[bgm_id] = sequence_offset
 
         # 1f. Insert the other sequences
@@ -158,11 +160,10 @@ class MusicModule(EbModule):
 
         # 2. Write packs to the rom
         for pack_id, pack in enumerate(packs):
+            self.pack_pointer_table[pack_id] = [0]
             if pack:
-                pack_offset = write_pack(rom, x)
+                pack_offset = write_pack(rom, pack)
                 self.pack_pointer_table[pack_id][0] = pack_offset
-            else:
-                self.pack_pointer_table[pack_id][0] = 0
 
         # 3. Write the data tables
         # 3a. Set up references for the subsequences
@@ -176,7 +177,13 @@ class MusicModule(EbModule):
             base_spc_offset = bgm_spc_offsets[bgm_id]
             bgm_spc_offsets[bgm_id] = base_spc_offset + sequence.source_bgm_offset
 
-        # 3b. Write the data tables to the rom
+        # 3b. Ensure no None values remain
+        # TODO Get the actual values
+        for bgm_id in range(self.music_dataset_table.num_rows):
+            if self.music_dataset_table[bgm_id][2] is None:
+                self.music_dataset_table[bgm_id][2] = 0
+
+        # 3c. Write the data tables to the rom
         self.pack_pointer_table.to_block(block=rom, offset=from_snes_address(PACK_POINTER_TABLE_OFFSET))
         self.music_dataset_table.to_block(block=rom, offset=from_snes_address(MUSIC_DATASET_TABLE_OFFSET))
 
@@ -188,7 +195,7 @@ class MusicModule(EbModule):
             self.program_chunk.to_file(f)
 
         always_loaded_songs = [x.bgm_id
-                               for x in self.sequences
+                               for x in self.sequences[1:]
                                if x.is_always_loaded]
         with resource_open("Music/always_loaded_songs", "yml") as f:
             yml_dump(always_loaded_songs, f)

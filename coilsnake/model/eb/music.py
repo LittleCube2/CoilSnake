@@ -149,7 +149,7 @@ class ChunkSequence(StringRepresentationMixin, Sequence):
 
     def write_to_pack(self, packs, pack_id, partner_pack_ids):
         sequence_offset = find_free_offset_in_pack(packs=packs, pack_id=pack_id, partner_pack_ids=partner_pack_ids,
-                                                   data_size=self.chunk)
+                                                   data_size=self.chunk.data_size())
         packs[pack_id][sequence_offset] = self.chunk
         return sequence_offset
 
@@ -240,7 +240,7 @@ def _brr_filter_3(brr_waveform, i):
 _BRR_FILTERS = [None, _brr_filter_1, _brr_filter_2, _brr_filter_3]
 
 
-# Documentation: http://wiki.superfamicom.org/snes/show/Bit+Rate+Reduction+%28BRR%29
+# Documentation: https://wiki.superfamicom.org/snes/show/Bit+Rate+Reduction+%28BRR%29
 class BrrWaveform(EqualityMixin, StringRepresentationMixin):
     def __init__(self):
         self.sampled_waveform = None
@@ -489,6 +489,7 @@ class EbInstrumentSet(object):
         while sample_id < len(self.samples):
             sample = self.samples[sample_id]
             if not sample:
+                sample_id += 1
                 continue
 
             # Figure out how big the pointer table and data chunks are going to be
@@ -516,7 +517,7 @@ class EbInstrumentSet(object):
             for next_sample_id in range(sample_id, sample_id + num_samples_in_chunk):
                 # Write the pointer
                 pointer_table_chunk.data.write_multi(
-                    key=next_sample_id * 2,
+                    key=(next_sample_id - sample_id) * 2,
                     item=sample_data_spc_offset,
                     size=2)
                 # Write the data
@@ -534,7 +535,7 @@ class EbInstrumentSet(object):
             # Continue the loop to the next group of samples
             sample_id += num_samples_in_chunk
 
-    def write_instruments_to_pack(self, pack):
+    def write_instruments_to_pack(self, packs, pack_id, partner_pack_ids):
         # TODO
         pass
 
@@ -605,6 +606,7 @@ class EbInstrumentSet(object):
     def create_from_project(cls, instrument_set_id, resource_open):
         instrument_set = cls()
         instrument_set.read_from_project(resource_open, instrument_set_id)
+        return instrument_set
 
 
 class EbNoteStyles(object):
